@@ -1,0 +1,150 @@
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include <DHT.h>
+#include <HCSR04.h>
+
+#define DHTPIN 4       // Digital pin connected to the DHT11 sensor
+#define DHTTYPE DHT11  // DHT sensor type (DHT11 or DHT22)
+DHT dht(DHTPIN, DHTTYPE);
+
+LiquidCrystal_I2C lcd(0x27, 20, 4); // Address for the I2C LCD module
+
+// Pins of HC-SR04 sensor
+const int trigPin = 2;
+const int echoPin = 3;
+
+// Initialization of the sensor with the pins
+UltraSonicDistanceSensor distanceSensor(trigPin, echoPin);
+
+// Calibrationn to get an accurate pH value
+float calibration_value = 21.34;
+int phval = 0;
+unsigned long int avgval;
+int buffer_arr[10], temp;
+
+const int pHpin = A0;      // Analog pin connected to the pH sensor (Connected to Arduino analog pin A0)
+const int TDSpin = A1;     // Analog pin connected to the TDS sensor (Connected to Arduino analog pin A1)
+const int waterPin = A2;   // Analog pin connected to the water level sensor (Connected to Arduino analog pin A2)
+const int heightPin = A3;  // Analog pin connected to the crop height sensor (Connected to Arduino analog pin A3)
+const int greenLedPin = 5; // Green LED pin (Connected to Arduino digital pin 5)
+const int redLedPin = 6;   // Red LED pin (Connected to Arduino digital pin 6)
+
+float optimumTemperature = 30.0;   // Optimum temperature for crops
+float optimumHumidity = 60.0;      // Optimum humidity for crops
+float optimumpH = 6.0;             // Optimum pH value for crops
+float optimumTDS = 600.0;          // Optimum TDS value for crops
+int optimalWaterLevel = 50;        // Optimal water level in percentage
+float sensorToVaseDistance = 13.0; // Distance from the sensor to the vase in centimeters
+
+void setup() {
+  Wire.begin();
+  lcd.begin(20, 4);
+  lcd.backlight();
+  dht.begin();
+  pinMode(pHpin, INPUT);
+  pinMode(TDSpin, INPUT);
+  pinMode(waterPin, INPUT);
+  pinMode(heightPin, INPUT);
+  pinMode(greenLedPin, OUTPUT);
+  pinMode(redLedPin, OUTPUT);
+}
+
+void displayMessage(String line1 = "", String line2 = "",
+                     String line3 = "", String line4 = "") {
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print(line1);
+
+  lcd.setCursor(0, 1);
+  lcd.print(line2);
+
+  lcd.setCursor(0, 2);
+  lcd.print(line3);
+
+  lcd.setCursor(0, 3);
+  lcd.print(line4);
+}
+
+void loop() {
+  // Display "Kratky Hydroponic" on the first two lines
+  displayMessage("Kratky",
+                 "Hydroponic :)");
+
+  delay(5000);
+
+  while (true) {
+    // Measure distance using the ultrasonic sensor
+    float distance = sensorToVaseDistance - distanceSensor.measureDistanceCm();
+
+    // Measure temperature and humidity using the DHT11 sensor
+    float temperature = dht.readTemperature();
+    float humidity = dht.readHumidity();
+
+    // Measure pH using the pH sensor
+    int i = 0;
+    while (i < 10) {
+      buffer_arr[i] = analogRead(pHpin);
+      delay(30);
+      i++;
+    }
+
+    i = 0;
+    while (i < 9) {
+      int j = i + 1;
+      while (j < 10) {
+        if (buffer_arr[i] > buffer_arr[j]) {
+          temp = buffer_arr[i];
+          buffer_arr[i] = buffer_arr[j];
+          buffer_arr[j] = temp;
+        }
+        j++;
+      }
+      i++;
+    }
+
+    avgval = 0;
+    i = 2;
+    while (i < 8) {
+      avgval += buffer_arr[i];
+      i++;
+    }
+
+    float volt = (float)avgval * 5.0 / 1024 / 6;
+    float ph_act = -5.70 * volt + calibration_value;
+
+    // Measure TDS using the TDS sensor
+    float tdsValue = analogRead(TDSpin);
+
+    // Measure water level using the water level sensor
+    int waterLevel =  100 + analogRead(waterPin) * 100 / 520;
+
+    // Display the sensor readings on the LCD
+    displayMessage("Temp: " + String(temperature, 1) + " C",
+                   "Humidity: " + String(humidity, 1) + "%");
+
+    delay(3000);
+
+    displayMessage("pH: " + String(ph_act, 1),
+                   "TDS: " + String(tdsValue, 1) + " ppm");
+
+    delay(3000);
+
+    displayMessage("Water: " + String(waterLevel) + " %",
+                   "Height: " + String(distance, 1) + " cm");
+
+    delay(3000);
+
+    // Check if all conditions are within the optimum range
+    if (temperature >= optimumTemperature && humidity >= optimumHumidity && ph_act >= optimumpH && tdsValue >= optimumTDS && waterLevel >= optimalWaterLevel) {
+      digitalWrite(greenLedPin, HIGH);  // Turn on the green LED
+      digitalWrite(redLedPin, LOW);     // Turn off the red LED
+      displayMessage("Crop is optimal");
+    } else {
+      digitalWrite(greenLedPin, LOW);   // Turn off the green LED
+      digitalWrite(redLedPin, HIGH);    // Turn on the red LED
+      displayMessage("Crop has issues");
+    }
+
+    delay(3000); // Delay for 3 seconds before next measurement
+  }
+}
